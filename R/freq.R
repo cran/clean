@@ -19,7 +19,8 @@
 
 #' Frequency table
 #'
-#' Create a frequency table of a \code{vector} or a \code{data.frame}. It supports tidyverse's quasiquotation and markdown for reports. Easiest practice is: \code{data \%>\% freq(var)} using the \href{https://magrittr.tidyverse.org/#usage}{tidyverse}.\cr
+#' @description Create a frequency table of a \code{vector} or a \code{data.frame}. It supports tidyverse's quasiquotation and markdown for reports. Easiest practice is: \code{data \%>\% freq(var)} using the \href{https://magrittr.tidyverse.org/#usage}{tidyverse}.
+#' 
 #' \code{top_freq} can be used to get the top/bottom \emph{n} items of a frequency table, with counts as names. It respects ties.
 #' @param x vector of any class or a \code{\link{data.frame}} or \code{\link{table}}
 #' @param ... up to nine different columns of \code{x} when \code{x} is a \code{data.frame} or \code{tibble}, to calculate frequencies from - see Examples. Also supports quasiquotion.
@@ -48,11 +49,12 @@
 #'   \item{Standard Deviation, using \code{\link[stats]{sd}}}
 #'   \item{Coefficient of Variation (CV), the standard deviation divided by the mean}
 #'   \item{Mean Absolute Deviation (MAD), using \code{\link[stats]{mad}}}
-#'   \item{Tukey Five-Number Summaries (minimum, Q1, median, Q3, maximum), using \code{\link[stats]{fivenum}}}
-#'   \item{Interquartile Range (IQR) calculated as \code{Q3 - Q1} using the Tukey Five-Number Summaries, i.e. \strong{not} using the \code{\link[stats]{quantile}} function}
-#'   \item{Coefficient of Quartile Variation (CQV, sometimes called coefficient of dispersion), calculated as \code{(Q3 - Q1) / (Q3 + Q1)} using the Tukey Five-Number Summaries}
-#'   \item{Outliers (total count and unique count), using \code{\link[grDevices]{boxplot.stats}}}
+#'   \item{Tukey Five-Number Summaries (minimum, Q1, median, Q3, maximum), see \emph{NOTE} below}
+#'   \item{Interquartile Range (IQR) calculated as \code{Q3 - Q1}, see \emph{NOTE} below}
+#'   \item{Coefficient of Quartile Variation (CQV, sometimes called coefficient of dispersion) calculated as \code{(Q3 - Q1) / (Q3 + Q1)}, see \emph{NOTE} below}
+#'   \item{Outliers (total count and percentage), using \code{\link[grDevices]{boxplot.stats}}}
 #' }
+#' \emph{NOTE}: These values are calculated using the same algorithm as used by Minitab and SPSS: \emph{p[k] = E[F(x[k])]}. See Type 6 on the \code{\link[stats]{quantile}} page.
 #'
 #' For dates and times of any class, these additional values will be calculated with \code{na.rm = TRUE} and shown into the header:
 #' \itemize{
@@ -62,22 +64,22 @@
 #'
 #' In factors, all factor levels that are not existing in the input data will be dropped at default.
 #'
-#' The function \code{top_freq} will include more than \code{n} rows if there are ties.
+#' The function \code{top_freq} will include more than \code{n} rows if there are ties. Use a negative number for \emph{n} (like \code{n = -3}) to select the bottom \emph{n} values.
 #' @section Extending the \code{freq()} function:
-#' Interested in extending the \code{freq()} function with your own class? Add a method like below to your package, and optionally define some header info by passing a \code{\link{list}} to the \code{.add_header} parameter, like we did with e.g. \code{freq.difftime}:
+#' Interested in extending the \code{freq()} function with your own class? Add a method like below to your package, and optionally define some header info by passing a \code{\link{list}} to the \code{.add_header} parameter, like below example for class \code{difftime}. This example assumes that you use the \code{roxygen2} package for package development.
 #' \preformatted{
 #' #' @exportMethod freq.difftime
-#' #' @importFrom clean freq
+#' #' @importFrom clean freq.default
 #' #' @export
 #' #' @noRd
 #' freq.difftime <- function(x, ...) {
-#'   freq(x = x, ...,
-#'        .add_header = list(units = attributes(x)$units))
+#'   freq.default(x = x, ...,
+#'                .add_header = list(units = attributes(x)$units))
 #' }
 #' }
-#' After this, you might want to add this to your \code{DESCRIPTION} file:
+#' Be sure to call \code{freq.default} in your function and not just \code{freq}. Also, add \code{clean} to the \code{Imports:} field of your \code{DESCRIPTION} file, to make sure that it will be installed with your package, e.g.:
 #' \preformatted{
-#' Enhances: clean
+#' Imports: clean
 #' }
 #' @keywords summary summarise frequency freq
 #' @rdname freq
@@ -107,7 +109,9 @@ freq <- function(x, ...) {
 }
 
 #' @exportMethod freq.default
+# force export this to support other packages:
 #' @export
+#' @export freq.default 
 #' @rdname freq
 freq.default <- function(x,
                          sort.count = TRUE,
@@ -127,6 +131,10 @@ freq.default <- function(x,
   
   format <- list(...)$format
   
+  # set header
+  header_list <- list(class = class(x),
+                      mode = mode(x))
+  header_list$length <- length(x)
   NAs <- x[is.na(x)]
   if (na.rm == TRUE) {
     x_class <- class(x)
@@ -139,10 +147,6 @@ freq.default <- function(x,
     markdown_line <- "  " # ending with two spaces results in newline
   }
   
-  # set header
-  header_list <- list(class = class(x),
-                      mode = mode(x))
-  header_list$length <- length(x)
   if (!is.null(levels(x))) {
     header_list$levels <- levels(x)
     header_list$ordered <- is.ordered(x)
@@ -178,56 +182,64 @@ freq.default <- function(x,
   }
   column_align <- c(x_align, "r", "r", "r", "r")
   
-  if (!is.null(format)) {
-    is.Date <- function(x) inherits(x, c("Date", "POSIXct"))
-    x <- format(x, format = ifelse(is.Date(x), format_datetime(format), format))
-    quote <- FALSE
-  }
-  
   # create the data.frame
-  df <- base::as.data.frame(base::table(x), stringsAsFactors = FALSE, )
-  colnames(df) <- c("item", "count")
-  # above is same as (but I want to keep it non-dplyr-dependent):
+  df <- base::as.data.frame(base::table(x), stringsAsFactors = FALSE)
+  if (NCOL(df) == 2) {
+    colnames(df) <- c("item", "count")
+  }
+  # above is essentially same as (but I want to keep it non-dplyr-dependent):
   # df <- tibble(item = x) %>%
   #   group_by(item) %>%
   #   summarise(count = n())
   
-  # reset original class
-  if (length(NAs) > 0 & !isTRUE(na.rm)) {
-    original <- c(sort(unique(x)), NA)
+  if (NROW(df) == 0) {
+    # return empty data.frame
+    df <- data.frame(item = character(),
+                     count = double(),
+                     percent = character(),
+                     cum_count = double(),
+                     cum_percent = double(),
+                     stringsAsFactors = FALSE)
   } else {
-    original <- sort(unique(x))
-  }
-  tryCatch(df$item <- original, error = function(e) invisible())
-
-  # sort according to setting
-  if (sort.count == TRUE) {
-    df <- df[order(-df$count),] # descending
-  } else {
-    df <- df[order(tolower(df$item)),] # ascending
-  }
-  rownames(df) <- NULL
-
-  # remove escape char
-  # see https://en.wikipedia.org/wiki/Escape_character#ASCII_escape_character
-  if ("\033" %in% x) {
-    df$item <- gsub("\033", " ", df$item, fixed = TRUE)
-  }
-
-  if (is.null(quote)) {
-    if (!is.numeric(x) & all(grepl("^[0-9]+$", x), na.rm = TRUE)) {
-      quote <- TRUE
+    
+    # reset original class
+    if (length(NAs) > 0 & !isTRUE(na.rm)) {
+      original <- c(sort(unique(x)), NA)
     } else {
-      quote <- FALSE
+      original <- sort(unique(x))
     }
+    
+    tryCatch(df$item <- original, error = function(e) invisible())
+    
+    # sort according to setting
+    if (sort.count == TRUE) {
+      df <- df[order(-df$count),] # descending
+    } else {
+      df <- df[order(tolower(df$item)),] # ascending
+    }
+    rownames(df) <- NULL
+    
+    # remove escape char
+    # see https://en.wikipedia.org/wiki/Escape_character#ASCII_escape_character
+    if ("\033" %in% x) {
+      df$item <- gsub("\033", " ", df$item, fixed = TRUE)
+    }
+    
+    if (is.null(quote)) {
+      if (!is.numeric(x) & all(grepl("^[0-9]+$", x), na.rm = TRUE)) {
+        quote <- TRUE
+      } else {
+        quote <- FALSE
+      }
+    }
+    if (quote == TRUE) {
+      df$item <- paste0('"', df$item, '"')
+    }
+    
+    df$percent <- df$count / base::sum(df$count, na.rm = TRUE)
+    df$cum_count <- base::cumsum(df$count)
+    df$cum_percent <- df$cum_count / base::sum(df$count, na.rm = TRUE)
   }
-  if (quote == TRUE) {
-    df$item <- paste0('"', df$item, '"')
-  }
-
-  df$percent <- df$count / base::sum(df$count, na.rm = TRUE)
-  df$cum_count <- base::cumsum(df$count)
-  df$cum_percent <- df$cum_count / base::sum(df$count, na.rm = TRUE)
   
   if (markdown == TRUE) {
     tbl_format <- "markdown"
@@ -241,6 +253,8 @@ freq.default <- function(x,
             class = unique(c("freq", class(df))),
             header = header_list, # header info
             opt = list(header = header, # TRUE/FALSE
+                       title = title,
+                       format = format,
                        row_names = row.names,
                        column_names = column_names,
                        column_align = column_align,
@@ -374,8 +388,8 @@ freq.character <- function(x, ...) {
 #' @export
 #' @rdname freq
 freq.numeric <- function(x, ..., digits = 2) {
-  Tukey_five = stats::fivenum(x, na.rm = TRUE)
-  Outliers <- grDevices::boxplot.stats(x)
+  Tukey_five = stats::quantile(x, probs = c(0.00, 0.25, 0.50, 0.75, 1.00), na.rm = TRUE, type = 6)
+  Outliers <- grDevices::boxplot.stats(x[!is.na(x)])
   
   # create a header like:
   # Mean:      71.06
@@ -415,11 +429,11 @@ freq.integer <- function(x, ...) {
 freq.Date <- function(x, ..., format = "yyyy-mm-dd") {
   freq.default(x = x, ..., 
                format = format,
-               .add_header = list(oldest = format(min(x, na.rm = TRUE), 
-                                                  format = format_datetime(format)),
+               .add_header = list(oldest = trimws(format(min(x, na.rm = TRUE), 
+                                                         format = format_datetime(format))),
                                   newest = paste0(
-                                    format(max(x, na.rm = TRUE), 
-                                           format = format_datetime(format)),
+                                    trimws(format(max(x, na.rm = TRUE), 
+                                                  format = format_datetime(format))),
                                     " (+", as.integer(max(x, na.rm = TRUE) - min(x, na.rm = TRUE)),
                                     " days)")))
 }
@@ -549,12 +563,23 @@ top_freq <- function(f, n) {
   if (!is.numeric(n) | length(n) != 1L) {
     stop("For `top_freq`, 'n' must be a number of length 1", call. = FALSE)
   }
-  count_at_place_n <- f[n, "count"]
-  top <- f[which(f$count >= count_at_place_n), ]
-  vect <- top[, "item"]
-  names(vect) <- top[, "count"]
-  if (length(vect) > abs(n)) {
-    message("top_freq: selecting ", length(vect), " items instead of ", abs(n), ", because of ties")
+  n_bak <- n
+  if (n > 0) {
+    n <- min(n, nrow(f))
+    count_at_place_n <- f[n, "count"]
+    items <- f[which(f$count >= count_at_place_n), ]
+  } else {
+    n <- nrow(f) + n + 1
+    n <- max(n, 1)
+    count_at_place_n <- f[n, "count"]
+    items <- f[which(f$count <= count_at_place_n), ]
+  }
+  vect <- items[, "item"]
+  names(vect) <- items[, "count"]
+  if (length(vect) < abs(n_bak)) {
+    message("top_freq: selecting all ", length(vect), " items")
+  } else if (length(vect) > abs(n_bak)) {
+    message("top_freq: selecting ", length(vect), " items instead of ", abs(n_bak), ", because of ties")
   }
   vect
 }
@@ -594,6 +619,12 @@ print.freq <- function(x,
     class(x) <- class(x)[!class(x) %in% c("freq", "frequency_tbl")]
     print(x)
     return(invisible())
+  }
+  
+  if (!is.null(opt$format)) {
+    is.Date <- function(x) inherits(x, c("Date", "POSIXct"))
+    x$item <- format(x$item, format = ifelse(is.Date(x$item), format_datetime(opt$format), opt$format))
+    quote <- FALSE
   }
 
   opt$header_txt <- header(x)
@@ -641,7 +672,11 @@ print.freq <- function(x,
     opt$header <- header
   }
 
-  title <- "Frequency table"
+  if (!is.null(opt$title)) {
+    title <- opt$title
+  } else {
+    title <- "Frequency table"
+  }
   if (isTRUE(opt$tbl_format == "pandoc")) {
     title <- bold(title)
   } else if (isTRUE(opt$tbl_format == "markdown")) {
@@ -818,28 +853,24 @@ as.data.frame.freq <- function(x, ...) {
 #' @importFrom graphics hist
 hist.freq <- function(x, breaks = "Sturges", main = NULL, xlab = NULL, ...) {
   opt <- attr(x, "opt")
-  if (!class(x$item) %in% c("numeric", "double", "integer", "Date")) {
+  if (!any(c("numeric", "double", "integer", "Date", "POSIXct") %in% class(x$item))) {
     stop("`x` must be numeric or Date.", call. = FALSE)
+  } else if (missing(breaks)) {
+    message('Assuming "years" as specification of \'breaks\' in histogram')
+    breaks <- "years"
   }
-  if (!is.null(opt$vars)) {
-    title <- opt$vars
-  } else if (!is.null(opt$data)) {
-    title <- opt$data
+  if (!is.null(opt$title)) {
+    title <- paste(" of", opt$title)
   } else {
-    title <- "frequency table"
-  }
-  if (class(x$item) == "Date") {
-    x <- as.Date(as.vector(x), origin = "1970-01-01")
-  } else {
-    x <- as.vector(x)
+    title <- ""
   }
   if (is.null(main)) {
-    main <- paste("Histogram of", title)
+    main <- paste("Histogram", title)
   }
   if (is.null(xlab)) {
-    xlab <- title
+    xlab <- opt$title
   }
-  hist(x, main = main, xlab = xlab, breaks = breaks, ...)
+  hist(x$item, main = main, xlab = xlab, breaks = breaks, ...)
 }
 
 #' @noRd
@@ -851,12 +882,10 @@ boxplot.freq <- function(x, main = NULL, xlab = NULL, ...) {
   if (!class(x$item) %in% c("numeric", "double", "integer", "Date")) {
     stop("`x` must be numeric or Date.", call. = FALSE)
   }
-  if (!is.null(opt$vars)) {
-    title <- opt$vars
-  } else if (!is.null(opt$data)) {
-    title <- opt$data
+  if (!is.null(opt$title)) {
+    title <- opt$title
   } else {
-    title <- "frequency table"
+    title <- "Frequency table"
   }
   if (class(x$item) == "Date") {
     x <- as.Date(as.vector(x), origin = "1970-01-01")
@@ -879,8 +908,8 @@ boxplot.freq <- function(x, main = NULL, xlab = NULL, ...) {
 #' @export
 plot.freq <- function(x, y, ...) {
   opt <- attr(x, "opt")
-  if (!is.null(opt$vars)) {
-    title <- opt$vars
+  if (!is.null(opt$title)) {
+    title <- opt$title
   } else {
     title <- ""
   }

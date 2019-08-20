@@ -95,7 +95,8 @@ header(f, property = NULL)
 A \code{data.frame} (with an additional class \code{"freq"}) with five columns: \code{item}, \code{count}, \code{percent}, \code{cum_count} and \code{cum_percent}.
 }
 \description{
-Create a frequency table of a \code{vector} or a \code{data.frame}. It supports tidyverse's quasiquotation and markdown for reports. Easiest practice is: \code{data \%>\% freq(var)} using the \href{https://magrittr.tidyverse.org/#usage}{tidyverse}.\cr
+Create a frequency table of a \code{vector} or a \code{data.frame}. It supports tidyverse's quasiquotation and markdown for reports. Easiest practice is: \code{data \%>\% freq(var)} using the \href{https://magrittr.tidyverse.org/#usage}{tidyverse}.
+
 \code{top_freq} can be used to get the top/bottom \emph{n} items of a frequency table, with counts as names. It respects ties.
 }
 \details{
@@ -107,11 +108,12 @@ For numeric values of any class, these additional values will all be calculated 
   \item{Standard Deviation, using \code{\link[stats]{sd}}}
   \item{Coefficient of Variation (CV), the standard deviation divided by the mean}
   \item{Mean Absolute Deviation (MAD), using \code{\link[stats]{mad}}}
-  \item{Tukey Five-Number Summaries (minimum, Q1, median, Q3, maximum), using \code{\link[stats]{fivenum}}}
-  \item{Interquartile Range (IQR) calculated as \code{Q3 - Q1} using the Tukey Five-Number Summaries, i.e. \strong{not} using the \code{\link[stats]{quantile}} function}
-  \item{Coefficient of Quartile Variation (CQV, sometimes called coefficient of dispersion), calculated as \code{(Q3 - Q1) / (Q3 + Q1)} using the Tukey Five-Number Summaries}
-  \item{Outliers (total count and unique count), using \code{\link[grDevices]{boxplot.stats}}}
+  \item{Tukey Five-Number Summaries (minimum, Q1, median, Q3, maximum), see \emph{NOTE} below}
+  \item{Interquartile Range (IQR) calculated as \code{Q3 - Q1}, see \emph{NOTE} below}
+  \item{Coefficient of Quartile Variation (CQV, sometimes called coefficient of dispersion) calculated as \code{(Q3 - Q1) / (Q3 + Q1)}, see \emph{NOTE} below}
+  \item{Outliers (total count and percentage), using \code{\link[grDevices]{boxplot.stats}}}
 }
+\emph{NOTE}: These values are calculated using the same algorithm as used by Minitab and SPSS: \emph{p[k] = E[F(x[k])]}. See Type 6 on the \code{\link[stats]{quantile}} page.
 
 For dates and times of any class, these additional values will be calculated with \code{na.rm = TRUE} and shown into the header:
 \itemize{
@@ -121,24 +123,24 @@ For dates and times of any class, these additional values will be calculated wit
 
 In factors, all factor levels that are not existing in the input data will be dropped at default.
 
-The function \code{top_freq} will include more than \code{n} rows if there are ties.
+The function \code{top_freq} will include more than \code{n} rows if there are ties. Use a negative number for \emph{n} (like \code{n = -3}) to select the bottom \emph{n} values.
 }
 \section{Extending the \code{freq()} function}{
 
-Interested in extending the \code{freq()} function with your own class? Add a method like below to your package, and optionally define some header info by passing a \code{\link{list}} to the \code{.add_header} parameter, like we did with e.g. \code{freq.difftime}:
+Interested in extending the \code{freq()} function with your own class? Add a method like below to your package, and optionally define some header info by passing a \code{\link{list}} to the \code{.add_header} parameter, like below example for class \code{difftime}. This example assumes that you use the \code{roxygen2} package for package development.
 \preformatted{
 #' @exportMethod freq.difftime
-#' @importFrom clean freq
+#' @importFrom clean freq.default
 #' @export
 #' @noRd
 freq.difftime <- function(x, ...) {
-  freq(x = x, ...,
-       .add_header = list(units = attributes(x)$units))
+  freq.default(x = x, ...,
+               .add_header = list(units = attributes(x)$units))
 }
 }
-After this, you might want to add this to your \code{DESCRIPTION} file:
+Be sure to call \code{freq.default} in your function and not just \code{freq}. Also, add \code{clean} to the \code{Imports:} field of your \code{DESCRIPTION} file, to make sure that it will be installed with your package, e.g.:
 \preformatted{
-Enhances: clean
+Imports: clean
 }
 }
 

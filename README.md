@@ -128,9 +128,30 @@ Use `clean()` to clean data. It guesses what kind of data class would best fit y
   #> [1] "2013-12-14"
   ```
   
-* `clean_numeric()` to remove all non-numbers from cluttered input text:
+* `clean_POSIXct` to remove all non-date/time characters and transform to a date/time element. It automatically adds the systems timezone, which can be changed by the user:
+
+  ```r
+  a <- clean_POSIXct("Created log on 2019/04/11 11:23 by user Joe")
+  a
+  #> "2019-04-11 11:23:00 CEST"
+  
+  b <- clean_POSIXct("Log am 2019.04.11 11:23 erstellt", tz = "US/Michigan")
+  b
+  #> "2019-04-11 11:23:00 EDT"
+  
+  difftime(a, b)
+  #> Time difference of -6 hours
+  ```
+  
+* `clean_numeric()` to remove all non-numbers from cluttered input text. It understands usage of dots and comma's in different languages:
   
   ```r
+  clean_numeric(c("$ 12,345.67",
+                  "€ 12.345,67",
+                  "12,345.67",
+                  "12345,67"))
+  #> [1] 12345.67 12345.67 12345.67 12345.67
+  
   clean_numeric("qwerty123456")
   #> [1] 123456
   
@@ -151,12 +172,43 @@ Use `clean()` to clean data. It guesses what kind of data class would best fit y
   You can define yourself what should be removed, with regular expressions:
   
   ```r
-  clean_character(x = c("Model: Pro A1",
+  clean_character(x = c("Model: Pro A1          ",
                         "Model specified: Pro A1",
-                        "Pro A1"), 
-                  remove = "^.*: ")
+                        "       Pro A1          "), 
+                  remove = "^.*:")
   #> [1] "Pro A1" "Pro A1" "Pro A1"
   ```
+  
+* `clean_currency()` to use the new `currency` class that comes with this package. It transforms the input with `clean_numeric()` first, after which it will be transformed with `as.currency()`, guessing the currency symbol based on your system locale:
+
+  ```r
+  clean_currency(c("Jack sent £ 25", "Bill sent £ 31.40"))
+  #> [1] `GBP 25.00` `GBP 31.40`
+  
+  received <- clean_currency(c("Received $25", "Received $31.40"))
+  received
+  #> [1] `USD 25.00` `USD 31.40`
+  
+  sum(received)
+  #> [1] `USD 56.40`
+  
+  format(sum(received), 
+         currency_symbol = "€", decimal.mark = ",")
+  #> [1] "€ 56,40"
+  ```
+  
+  This new class also comes with support for printing in `tibble`s, used by the [`tidyverse`](https://www.tidyverse.org):
+  
+  ```r
+  library(tibble)
+  tibble(money = clean_currency(c("Jack sent £ 25", "Bill sent £ 31.40")))
+  #> # A tibble: 2 x 1
+  #>         money
+  #>   <crncy/GBP>
+  #> 1       25.00
+  #> 2       31.40
+  ```
+
   
 ### Checking
 
@@ -256,14 +308,14 @@ Cleaning 500,000 values (!) only takes 0.3-0.6 seconds on our system.
 If invalid regular expressions are used, the cleaning functions will not throw errors, but instead will show a warning and will interpret the expression as a fixed value:
 
 ```r
-clean_character("0123test0123")
-#> [1] "test"
+clean_character("0123test 0123[a-b] ")
+#> [1] "test ab"
 
-clean_character("0123test0123", remove = "[a-g0-9]")
-#> [1] "tst"
+clean_character("0123test 0123[a-b] ", remove = "[a-b]")
+#> [1] "0123test 0123[-]"
 
-clean_character("0123test0123", remove = "[a-g")
-#> [1] "0123test0123"
+clean_character("0123test0123", remove = "[a-b")
+#> [1] "0123test 0123]"
 #> Warning message:
-#> invalid regular expression '[a-g', reason 'Missing ']'' - now interpreting as fixed value 
+#> invalid regular expression '[a-b', reason 'Missing ']'' - now interpreting as fixed value 
 ```

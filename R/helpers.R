@@ -70,8 +70,10 @@ cv <- function(x, na.rm = TRUE) {
 # Coefficient of dispersion, or coefficient of quartile variation (CQV).
 # (Bonett et al., 2006: Confidence interval for a coefficient of quartile variation).
 cqv <- function(x, na.rm = TRUE) {
-  fives <- stats::fivenum(x, na.rm = na.rm)
-  (fives[4] - fives[2]) / (fives[4] + fives[2])
+  # using type 6:
+  # m = p. p[k] = k / (n + 1). Thus p[k] = E[F(x[k])]. This is used by Minitab and by SPSS.
+  quartiles <- stats::quantile(x, probs = c(0.25, 0.75), na.rm = na.rm, type = 6)
+  (quartiles[2] - quartiles[1]) / (quartiles[2] + quartiles[1])
 }
 
 # source: scales::number -> scales::percent
@@ -80,7 +82,7 @@ percent_scales <- function (x,
                             scale = 100,
                             prefix = "", 
                             suffix = "%", 
-                            big.mark = " ",
+                            big.mark = ",",
                             decimal.mark = ".",
                             trim = TRUE, ...) {
   if (length(x) == 0) 
@@ -88,6 +90,15 @@ percent_scales <- function (x,
   x <- round(x / (accuracy / scale)) * (accuracy / scale)
   nsmall <- -floor(log10(accuracy))
   nsmall <- min(max(nsmall, 0), 20)
+  if (decimal.mark == big.mark) {
+    if (decimal.mark == ",") {
+      big.mark <- "."
+    } else if (decimal.mark == ".") {
+      big.mark <- ","
+    } else {
+      big.mark <- " "
+    }
+  }
   ret <- format(scale * x, big.mark = big.mark, decimal.mark = decimal.mark, 
                 trim = trim, nsmall = nsmall, scientific = FALSE, ...)
   ret <- paste0(prefix, ret, suffix)

@@ -29,9 +29,11 @@
 #' @param droplevels logical to indicate whether non-existing factor levels should be dropped
 #' @param ordered logical to indicate whether the factor levels should be ordered
 #' @param fixed logical to indicate whether regular expressions should be turned off
+#' @param trim logical to indicate whether the result should be trimmed with \code{\link{trimws}}
 #' @param ignore.case logical to indicate whether matching should be case-insensitive
 #' @param format a date format that will be passed on to \code{\link{format_datetime}}, see Details
-#' @param ... other parameters passed on to \code{\link{as.Date}}
+#' @param currency_symbol the currency symbol to use, which will be guessed based on the input and otherwise defaults to the current system locale setting (see \code{\link{Sys.localeconv}})
+#' @param ... other parameters passed on to \code{\link{as.Date}} or \code{\link{as.POSIXct}}
 #' @details
 #' Using \code{clean()} on a vector will guess a cleaning function based on the potential number of \code{NAs} it returns. Using \code{clean()} on a data.frame to apply this guessed cleaning over all columns.
 #' 
@@ -40,8 +42,10 @@
 #' \itemize{
 #'   \item{\code{clean_logical()}:\cr}{Use parameters \code{true} and \code{false} to match values using case-insensitive regular expressions (\link[base]{regex}). Unmatched values are considered \code{NA}. At default, values are matched with \code{\link{regex_true}} and \code{\link{regex_false}}. This allows support for values "Yes" and "No" in the following languages: Arabic, Bengali, Chinese (Mandarin), Dutch, English, French, German, Hindi, Indonesian, Japanese, Malay, Portuguese, Russian, Spanish, Telugu, Turkish and Urdu. Use parameter \code{na} to override values as \code{NA} that would else be matched with \code{true} or \code{false}. See Examples.}
 #'   \item{\code{clean_factor()}:\cr}{Use parameter \code{levels} to set new factor levels. They can be case-insensitive regular expressions to match existing values of \code{x}. For matching, new values for \code{levels} are internally temporary sorted descending on text length. See Examples.}
-#'   \item{\code{clean_numeric()} and \code{clean_character()}:\cr}{Use parameter \code{remove} to match values that must be removed from the input, using regular expressions (\link[base]{regex}). In case of \code{clean_numeric}, comma's will be read as dots. See Examples.}
+#'   \item{\code{clean_numeric()} and \code{clean_character()}:\cr}{Use parameter \code{remove} to match values that must be removed from the input, using regular expressions (\link[base]{regex}). In case of \code{clean_numeric()}, comma's will be read as dots and only the last dot will be kept. Function \code{clean_character()} will keep middle spaces at default. See Examples.}
+#'   \item{\code{clean_currency()}:\cr}{This new class works like \code{clean_numeric()}, but transforms it with \code{\link{as.currency}}. The currency symbol is guessed based on the most traded currencies by value (see Source): the United States dollar, Euro, Japanese yen, Pound sterling, Swiss franc, Renminbi, Swedish krona, Mexican peso, South Korean won, Turkish lira, Russian ruble, Indian rupee and the South African rand. See Examples.}
 #'   \item{\code{clean_Date()}:\cr}{Use parameter \code{format} to define a date format, or leave it empty to have the format guessed. Use \code{"Excel"} to read values as Microsoft Excel dates. The \code{format} parameter will be evaluated with \code{\link{format_datetime}}, which means that a format like \code{"d-mmm-yy"} with be translated internally to \code{"\%e-\%b-\%y"} for convenience. See Examples.}
+#'   \item{\code{clean_POSIXct()}:\cr}{Use parameter \code{remove} to match values that must be removed from the input, using regular expressions (\link[base]{regex}). The resulting string will be coerced to a date/time element with class \code{POSIXct}, using \code{\link{as.POSIXct}()}. See Examples.}
 #' }
 #' 
 #' The use of invalid regular expressions in any of the above functions will not return an error (like in base R), but will instead interpret the expression as a fixed value and will throw a warning.
@@ -52,10 +56,13 @@
 #'   \item{\code{clean_factor()}: class \code{factor}}
 #'   \item{\code{clean_numeric()}: class \code{numeric}}
 #'   \item{\code{clean_character()}: class \code{character}}
+#'   \item{\code{clean_currency()}: class \code{currency}}
 #'   \item{\code{clean_Date()}: class \code{Date}}
+#'   \item{\code{clean_POSIXct()}: classes \code{POSIXct/POSIXt}}
 #' }
 #' @export
 #' @exportMethod clean
+#' @source \href{http://www.bis.org/publ/rpfx16fx.pdf}{Triennial Central Bank Survey Foreign exchange turnover in April 2016} (PDF). Bank for International Settlements. 11 December 2016. p. 10.
 #' @examples 
 #' clean_logical(c("Yes", "No"))   # English
 #' clean_logical(c("Oui", "Non"))  # French
@@ -75,12 +82,17 @@
 #' clean_Date("43658")
 #' clean_Date("14526", "Excel") # "1939-10-08"
 #' 
+#' clean_POSIXct("Created log on 2019/04/11 11:23 by user Joe")
+#' 
 #' clean_numeric("qwerty123456")
 #' clean_numeric("Positive (0.143)")
 #' clean_numeric("0,143")
 #' 
 #' clean_character("qwerty123456")
 #' clean_character("Positive (0.143)")
+#' 
+#' clean_currency(c("Received $ 25", "Received $ 31.40"))
+#' clean_currency(c("Jack sent £ 25", "Bill sent £ 31.40"))
 #'  
 #' clean("12 06 2012")
 #' clean(data.frame(dates = "2013-04-02", 
@@ -94,11 +106,11 @@ clean <- function(x) {
 #' @noRd
 clean.default <- function(x) {
   x_withoutNA <- x[!is.na(x)]
-  fns <- c("logical", "Date", "numeric", "character")
+  fns <- c("Date", "numeric", "logical", "character")
   for (i in 1:length(fns)) {
     fn <- get(paste0("clean_", fns[i]), envir = asNamespace("clean"))
     if (all(!is.na(suppressWarnings(suppressMessages(fn(x_withoutNA)))))) {
-      message("Cleaning to '", fns[i], "'")
+      message("Cleaning to class '", fns[i], "'")
       return(fn(x_withoutNA))
     }
   }
@@ -177,13 +189,62 @@ clean_factor <- function(x, levels = unique(x), ordered = FALSE, droplevels = FA
 #' @export
 clean_numeric <- function(x, remove = "[^0-9.,]", fixed = FALSE) {
   x <- gsub(",", ".", x)
+  # remove ending dot/comma
+  x <- gsub("[,.]$", "", x)
+  # only keep last dot/comma
+  reverse <- function(x) sapply(lapply(strsplit(x, NULL), rev), paste, collapse = "")
+  x <- sub("{{dot}}", ".", 
+           gsub(".", "",
+                reverse(sub(".", "}}tod{{",
+                            reverse(x), 
+                            fixed = TRUE)),
+                fixed = TRUE), 
+           fixed = TRUE)
   as.numeric(gsub_warn_on_error(remove, "", x, ignore.case = TRUE, fixed = fixed))
 }
 
 #' @rdname clean
 #' @export
-clean_character <- function(x, remove = "[^a-z]", fixed = FALSE, ignore.case = TRUE) {
-  as.character(gsub_warn_on_error(remove, "", x, ignore.case = ignore.case, fixed = fixed))
+clean_character <- function(x, remove = "[^a-z \t\r\n]", fixed = FALSE, ignore.case = TRUE, trim = TRUE) {
+  x <- as.character(gsub_warn_on_error(remove, "", x, ignore.case = ignore.case, fixed = fixed))
+  if (isTRUE(trim)) {
+    trimws(x, which = "both", whitespace = "[ \t\r\n]")
+  } else {
+    x
+  }
+}
+
+#' @rdname clean
+#' @export
+clean_currency <- function(x, currency_symbol = NULL, ...) {
+  if (isTRUE(any(grepl("[^a-zA-Z]([\u0024]|USD)", x)))) { # Dollar Sign
+    currency_symbol <- "USD"
+  } else if (isTRUE(any(grepl("[^a-zA-Z]([\u20ac]|EUR)", x)))) { # Euro sign
+    currency_symbol <- "EUR"
+  } else if (isTRUE(any(grepl("[^a-zA-Z]([\u00a5]|JPY)", x)))) { # Yen sign
+    currency_symbol <- "JPY"
+  } else if (isTRUE(any(grepl("[^a-zA-Z]([\u00a3]|GBP)", x)))) {
+    currency_symbol <- "GBP"
+  } else if (isTRUE(any(grepl("[^a-zA-Z](Fr|CHF)", x)))) {
+    currency_symbol <- "CHF"
+  } else if (isTRUE(any(grepl("[^a-zA-Z]([\u5143]|CNY)", x)))) {
+    currency_symbol <- "CNY"
+  } else if (isTRUE(any(grepl("[^a-zA-Z](k|SEK)r", x)))) {
+    currency_symbol <- "SEK"
+  } else if (isTRUE(any(grepl("[^a-zA-Z]([\u20a9]|KRW)", x)))) { # Won sign
+    currency_symbol <- "KRW"
+  } else if (isTRUE(any(grepl("[^a-zA-Z](TRY)", x)))) { # Lira sign
+    currency_symbol <- "TRY"
+  } else if (isTRUE(any(grepl("[^a-zA-Z](RUB)", x)))) { # Ruble sign
+    currency_symbol <- "RUB"
+  } else if (isTRUE(any(grepl("[^a-zA-Z](INR)", x)))) { # Rubee sign
+    currency_symbol <- "INR"
+  } else if (isTRUE(any(grepl("[^a-zA-Z](ZAR)", x)))) {
+    currency_symbol <- "ZAR"
+  } else {
+    currency_symbol <- Sys.localeconv()["int_curr_symbol"]
+  }
+  as.currency(clean_numeric(x, ...), currency_symbol = currency_symbol)
 }
 
 
@@ -300,4 +361,12 @@ clean_Date <- function(x, format = NULL, ...) {
   }
   warning("Date/time format could not be determined automatically, returning NAs", call. = FALSE)
   as.Date(rep(NA, length(x)))
+}
+
+#' @rdname clean
+#' @export
+clean_POSIXct <- function(x, remove = "[^.0-9 :/-]", fixed = FALSE, ...) {
+  x <- trimws(gsub_warn_on_error(remove, "", x, ignore.case = TRUE, fixed = fixed))
+  x <- gsub("[\\./]", "-", x)
+  as.POSIXct(x, ...)
 }
