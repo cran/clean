@@ -3,7 +3,7 @@
 # Fast and Easy Data Cleaning                                          #
 #                                                                      #
 # SOURCE                                                               #
-# https://github.com/msberends/clean                                   #
+# https://github.com/msberends/cleaner                                 #
 #                                                                      #
 # LICENCE                                                              #
 # (c) 2019 Berends MS (m.s.berends@umcg.nl)                            #
@@ -17,13 +17,5 @@
 # useful, but it comes WITHOUT ANY WARRANTY OR LIABILITY.              #
 # ==================================================================== #
 
-#' Example data that is not clean
-#' 
-#' This typical data example can be used for checking and cleaning.
-#' @format A \code{\link{data.frame}} with 500 observations and the following variables:
-#' \describe{
-#'   \item{\code{date}}{Dates imported from Excel, they are integers ranging from ~30,000 to ~43,000.}
-#'   \item{\code{gender}}{Characters with mixed values observed in original data about patients gender.}
-#' }
-#' @seealso \code{\link{freq}} to check values and \code{\link{clean}} to clean them.
-"unclean"
+#' @importFrom cleaner clean
+NULL
